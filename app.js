@@ -7,6 +7,7 @@ var bodyParser = require('body-parser');
 var hfc = require('hfc');
 var fs = require('fs');
 var util = require('util');
+const readline = require('readline');
 
 // block
 console.log(" **** starting HFC sample ****");
@@ -29,6 +30,7 @@ var eh = chain.getEventHub();
 process.on('exit', function (){
   console.log(" ****  app exit ****");
   chain.eventHubDisconnect();
+  fs.closeSync(wFd);
 });
 
 chain.setKeyValStore(hfc.newFileKeyValStore(keyValStorePath));
@@ -80,59 +82,64 @@ app.get('/app/deploy',function(req, res){
                     args: [],
                     chaincodePath: "/usr/local/llwork/api/apiccpath"
                 };
+                
+                chain.setDeployWaitTime(50); //http请求默认超时是60s（nginx），所以这里的超时时间要少于60s，否则http请求会超时失败
+                
+                console.log("deploy begin at" + getNowTime())
 
                 // Trigger the deploy transaction
                 var deployTx = user.deploy(deployRequest);
+                
+                
+                
+                var body = {
+                    code : retCode.OK,
+                    msg: "OK"
+                };
 
                 // Print the deploy results
                 deployTx.on('complete', function(results) {
-                    
+                    console.log("deploy end at" + getNowTime())
                     console.log("results.chaincodeID=========="+results.chaincodeID);
-
+                    res.send(body)
                 });
 
                 deployTx.on('error', function(err) {
                     
-                    console.log("err=========="+err.toString());
+                    console.log("err==========%s, at%s", err.toString(), getNowTime());
+                    body.code=retCode.ERROR;
+                    body.msg="deploy error"
+                    res.send(body)
                 });
-
-                var body = {
-
-                    "results": "OK"
-                };
-
-                res.send(body)
             })
-
         }
-
     });
-
 });  
+
 
 app.get('/app/invoke', function(req, res) { 
 
     res.set({'Content-Type':'text/json','Encodeing':'utf8'});
     
-    /*
-    var enrollUser = req.query.acc;  //use account
+    var enrollUser = req.query.usr;
     
-    var enrollPasswd, err = getUserPasswd(acc);
-    if (err) {
-        res.send("error"); 
+    var enrollPasswd = getUserPasswd(enrollUser);
+    if (!enrollPasswd) {
+        console.log("Invoke: Failed to get passwd: %s",enrollUser);
+        res.send("tx error"); 
         return
     }
-    */
 
 
-    chain.enroll(adminUser, adminPasswd, function (err, user) {
+    chain.enroll(enrollUser, enrollPasswd, function (err, user) {
         
         if (err) {
             console.log("ERROR: failed to register user: %s",err);
             res.send("admin" + ' not regist or pw error')
+            return
         }
-                
-        console.log("**** Enrolled ****");
+
+        //console.log("**** invoke Enrolled ****");
 
         var ccId = req.query.ccId;
         var func = req.query.func;
@@ -145,7 +152,7 @@ app.get('/app/invoke', function(req, res) {
             
             chaincodeID: ccId,
             fcn: func,
-            args: [acc, amt, reacc]
+            args: [acc, amt, reacc, enrollUser]
         };   
         
         // invoke
@@ -154,7 +161,7 @@ app.get('/app/invoke', function(req, res) {
         tx.on('complete', function (results) {
             
             var retInfo = results.result.toString()  // like: "Tx 2eecbc7b-eb1b-40c0-818d-4340863862fe complete"
-            console.log("invoke completed successfully: request=%j, results=%j",invokeRequest, retInfo);
+            //console.log("invoke completed successfully: request=%j, results=%j",invokeRequest, retInfo);
             
             if (func == "transfer") {
                 var txId = retInfo.replace("Tx ", '').replace(" complete", '')
@@ -164,7 +171,7 @@ app.get('/app/invoke', function(req, res) {
                 };
 
                 res.send(body)
-            } else {            
+            } else {
                 res.send(retInfo); 
             }
 
@@ -193,24 +200,26 @@ app.get('/app/query', function(req, res) {
 
     res.set({'Content-Type':'text/json','Encodeing':'utf8'});  
 
-    /*
-    var enrollUser = req.query.acc;  //use account
-    
-    var enrollPasswd, err = getUserPasswd(acc);
-    if (err) {
-        res.send("error"); 
+    var enrollUser = req.query.usr;  
+
+    var enrollPasswd = getUserPasswd(enrollUser);
+    if (!enrollPasswd) {
+        console.log("Query: Failed to get passwd: %s",enrollUser);
+        res.send("tx error"); 
         return
     }
-    */
 
-    chain.enroll(adminUser, adminPasswd, function (err, user) {
+    //console.log("query: enroll with %s : %s", enrollUser, enrollPasswd)
+
+    chain.enroll(enrollUser, enrollPasswd, function (err, user) {
         
         if (err) {
             console.log("ERROR: failed to register user: %s",err);
             res.send("admin" + ' not regist or pw error')
+            return
         }
-                
-        console.log("**** Enrolled ****");
+
+        //console.log("**** query Enrolled ****");
   
         var ccId = req.query.ccId;
         var func = req.query.func;
@@ -221,7 +230,7 @@ app.get('/app/query', function(req, res) {
             
             chaincodeID: ccId,
             fcn: func,
-            args: [acc]
+            args: [acc, enrollUser]
         };   
         
         // invoke
@@ -229,7 +238,7 @@ app.get('/app/query', function(req, res) {
 
         tx.on('complete', function (results) {
             
-            console.log("query completed successfully: request=%j, results=%j",queryRequest,results);
+            //console.log("query completed successfully: request=%j, results=%j",queryRequest,results);
 
             res.send(results.result.toString())
 
@@ -258,21 +267,37 @@ app.get('/app/register', function(req, res) {
         console.log("I did find this member", member)
     });
     */
+    
+    var user = req.query.usr;
+   
+    var body = {
+        code: retCode.OK,
+        msg: "OK"
+    };
+    
+    if (getUserPasswd(user)) {
+        console.log("register: user '%s' exists. ", user)
+        res.send(body)
+        return
+    }
+        
 
     chain.enroll(adminUser, adminPasswd, function (err, adminUser) {
         
         if (err) {
-            console.log("ERROR: failed to register user: %s",err);
-            res.send("admin" + ' not regist or pw error')
+            console.log("ERROR: failed to register user: %s", user, err);
+            body.code = retCode.ERROR
+            body.msg = "register error"
+            res.send(body) 
+            return;
         }
 
-        var acc = req.query.acc;
 
         chain.setRegistrar(adminUser);
         
         var registrationRequest = {
             roles: [ 'client' ],
-            enrollmentID: acc,
+            enrollmentID: user,
             affiliation: "bank_a",
             //attributes: attributes,
             registrar: adminUser
@@ -280,26 +305,30 @@ app.get('/app/register', function(req, res) {
 
         chain.register(registrationRequest, function(err, enrollmentPassword) {
             if (err) {
-                console.log("register: couldn't register name ", acc, err)
-                res.send("register error") 
+                console.log("register: couldn't register name ", user, err)
+                body.code = retCode.ERROR
+                body.msg = "register error"
+                res.send(body) 
             }
-            // Fetch name's member so we can set the Registrar
-            setUserPasswd(acc, enrollmentPassword)
-            
-            //res.send(enrollmentPassword)
-            var body = {
-                code: retCode.OK,
-                msg: "OK"
-            };
 
+            if (!setUserPasswd(user, enrollmentPassword, true)) {
+                console.log("register: set passwd error.")
+                body.code = retCode.ERROR
+                body.msg = "register error"
+            }
+            
             res.send(body)
             
        });
-
-
     });   
 });
 
+
+
+var passFile = "/usr/local/llwork/hfc_keyValStore/user.enrollpasswd"
+var wFd = -1
+var delimiter = ":"
+var endl = "\n"
 
 /**
  * cache for acc and passwd.
@@ -311,7 +340,29 @@ var accPassCache={}
  * init accPassCache
  */
 function initAccPassCache() {
-    
+    if (fs.existsSync(passFile)) {
+        console.log("load passwd. at ", getNowTime());
+
+        const rdLn = readline.createInterface({
+            input: fs.createReadStream(passFile)
+        });
+        
+        var rowCnt = 0;
+        rdLn.on('line', function (line) {
+            rowCnt++;
+            var arr = line.split(delimiter)
+            if (arr.length != 2)
+                console.log("line '%s' is invalid in '%s'.", line, passFile);
+            else {
+                if (!setUserPasswd(arr[0], arr[1]))
+                    console.log("initAccPassCache: set passwd(%s:%s) failed.", arr[0],  arr[1]);
+            }
+        });
+        
+        rdLn.on('close', function() {
+            console.log("read %d rows on Init. at %s", rowCnt, getNowTime());
+        })
+    }
 };
 
 
@@ -319,26 +370,70 @@ function initAccPassCache() {
  * Set the passwd.
  * @returns error.
  */
-function setUserPasswd(name, passwd) {
+function setUserPasswd(name, passwd, isStored) {
     accPassCache[name] = passwd
+    if (isStored == true) {
+        return storePasswd(name, passwd)
+    }
+    return true;
 };
 
 
 /**
  * Get the passwd.
- * @returns passwd, error.
+ * @returns passwd
  */
 function getUserPasswd(name) {
-    passwd = accPassCache[name];
-    if (passwd)
-        return passwd
-    else
-        return null, "get user passwd failed, not regisger?"
+    return accPassCache[name];
 };
 
 
 
+function writeManyUsers() {
+    console.log("begin  at", new Date().getTime());
+    var tetsObj={}
+    for (var i=0; i<1000000; i++){
+        tetsObj["testUserXXXXX" + i] = "Xurw3yU9zI0l"
+    }
+    console.log("after init obj at", new Date().getTime());
+    
+    fs.writeFileSync(passFile, JSON.stringify(tetsObj));
+    
+    console.log("end at", new Date().getTime());
+};
 
+function storePasswd(name, passwd) {
+    var newLine = name + delimiter + passwd + endl;
+    var ret = fs.writeSync(wFd, newLine)
+    
+    //writeSync返回的是写入字节数
+    if (ret != newLine.length) {
+        console.log("storePasswd: write %s failed (%d,%d).", newLine, ret, newLine.length);
+        return false;
+    }
+    fs.fsyncSync(wFd);
+    return true;
+}
+
+function getNowTime() {
+    return ((new Date()).toLocaleString());
+}
+
+
+initAccPassCache();
+
+wFd = fs.openSync(passFile, "a")
+if (wFd < 0) {
+    console.log("open file %s failed", passFile);
+    process.exit(1)
+}
+
+//for (var i=0; i<1000000; i++){
+//    fs.writeSync(wFd, "testUserXXXXX" + i + delimiter + "Xurw3yU9zI0l" + endl)
+//}
+//for (var i=0; i<500000; i++) 
+//   fs.writeSync(wFd, "testUserIIIIIIII" + i + delimiter + "500000U9zI0l" + endl)
+//fs.fsyncSync(wFd);
 
  
 app.listen(8088, "127.0.0.1");
