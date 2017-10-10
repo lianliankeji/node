@@ -17,7 +17,7 @@ var PEER_ADDRESS = "grpc://127.0.0.1:7051";
 var EVENTHUB_ADDRESS = "grpc://127.0.0.1:7053";
 
 // var pem = fs.readFileSync('./cert/us.blockchain.ibm.com.cert'); 
-var chain = hfc.newChain("testChain");
+var chain = hfc.newChain("frtChain");
 var keyValStorePath = "/usr/local/llwork/hfc_keyValStore";
 
 chain.setDevMode(false);
@@ -361,22 +361,21 @@ function __execInvoke(req, res) {
                 fcn: func,
                 confidential: isConfidential,
                 attrs: getCertAttrKeys,
-                args: [],
+                args: [enrollUser, acc, (new Date()).getTime() + ""],  //getTime()要转为字符串
                 userCert: TCert
             }
             
             if (func == "account" || func == "accountCB") {
-                invokeRequest.args = [enrollUser, acc]
-                
+                                
             } else if (func == "issue") {
                 var amt = req.query.amt;
-                invokeRequest.args = [enrollUser, acc, amt]
+                invokeRequest.args.push(amt)
                 
             } else if (func == "transefer") {
                 var reacc = req.query.reacc;
                 var amt = req.query.amt;
                 var transType = req.query.transType;
-                invokeRequest.args = [enrollUser, acc, reacc, transType, amt]
+                invokeRequest.args.push(reacc, transType, amt)
                 
             } else if (func == "support") {
                 var movieId = req.query.movie
@@ -391,9 +390,8 @@ function __execInvoke(req, res) {
                 
                 var amt = req.query.amt;
                 var transType = req.query.transType;
-                invokeRequest.args = [enrollUser, acc, reacc, transType, amt]
+                invokeRequest.args.push(reacc, transType, amt)
                 invokeRequest.fcn = "transefer"  //还是走的transefer
-                
             }
 
             // invoke
