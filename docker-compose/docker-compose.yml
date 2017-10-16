@@ -12,6 +12,8 @@ membersrvc:
   container_name: membersrvc
   image: hyperledger/fabric-membersrvc:latest
   restart: unless-stopped
+  environment:
+    - MEMBERSRVC_CA_ACA_ENABLED=true
   expose:
     - "7054"
   ports:
